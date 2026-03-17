@@ -3,7 +3,7 @@ import numpy as np
 
 from const import ROLL
 
-df = pd.read_csv(r'data/andrzej rozbicie.csv')
+df = pd.read_csv(r'../data/andrzej rozbicie.csv')
 
 dt = 0.01
 
