@@ -24,7 +24,7 @@ def calc_pitch(acc_x_list, acc_y_list, acc_z_list, gyr_y_list, dt, alpha):
     return pitch
 
 
-def calc_roll(acc_y_list, acc_z_list, gyr_x_list, dt, alpha):
+def calc_roll(acc_y_list, acc_z_list, gyr_x_list, deltatime_list, alpha):
     roll_gyr = 0
     roll = []
     iterations = min(len(acc_y_list), len(gyr_x_list), len(acc_z_list))
@@ -32,6 +32,7 @@ def calc_roll(acc_y_list, acc_z_list, gyr_x_list, dt, alpha):
         acc_z = acc_z_list[index]
         acc_y = acc_y_list[index]
         gyr_x = gyr_x_list[index]
+        dt = deltatime_list[index]
         roll_acc = np.arctan2(acc_y, acc_z)
         roll_gyr = roll_gyr + gyr_x * dt
         roll_gyr = alpha * roll_gyr + (1 - alpha) * roll_acc
@@ -46,16 +47,14 @@ def get_position_from_rotation(pitch, roll, yaw=None):
     return x, y, z
 
 
-
-
-
-def calc_jerk(acc_x_list, acc_y_list, acc_z_list, dt):
+def calc_jerk(acc_x_list, acc_y_list, acc_z_list, dt_list):
     jerk = []
     iterations = min(len(acc_x_list), len(acc_y_list), len(acc_z_list))
     for index in range(iterations):
         acc_x = acc_x_list[index]
         acc_y = acc_y_list[index]
         acc_z = acc_z_list[index]
+        dt = dt_list[index]
         a = np.sqrt(acc_x ** 2 + acc_y ** 2 + acc_z ** 2)
         if index == 0:
             jerk.append(a)
@@ -107,9 +106,4 @@ def get_df_from_csv(path):
 
 
 if __name__ == '__main__':
-    df = get_df_from_csv(r'/data/data20260312_203448.csv')
-    df['jerk'] = calc_jerk(df[ACC_X], df[ACC_Y], df[ACC_Z])
-    df[PITCH] = calc_pitch(acc_x_list=df[ACC_X], acc_y_list=df[ACC_Y], acc_z_list=df[ACC_Z], gyr_y_list=df[GYR_Y],
-                           alpha=0.98, dt=0.01)
-
-    df[ROLL] = calc_roll(acc_y_list=df[ACC_Y], acc_z_list=df[ACC_Z], gyr_x_list=df[GYR_X], dt=0.01, alpha=0.98)
+    pass

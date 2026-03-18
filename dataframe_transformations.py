@@ -14,62 +14,80 @@ def get_df_from_csv(path):
     return df
 
 
-def add_jerk(df: DataFrame, dt):
-    try:
-        df[JERK] = calc_jerk(df[LIN_ACC_X], df[LIN_ACC_Y], df[LIN_ACC_Z], dt)
-    except KeyError as ke:
-        print(f"First calculete: {ke}")
-    return df
+class DataFrameTransformations:
+    def __init__(self, data: DataFrame):
+        self.data = data
 
+    def add_jerk(self):
+        try:
+            self.data[JERK] = calc_jerk(
+                self.data[LIN_ACC_X],
+                self.data[LIN_ACC_Y],
+                self.data[LIN_ACC_Z],
+                self.data[DT]
+            )
+        except KeyError as ke:
+            print(f"First calculate: {ke}")
+        return self
 
-def add_pitch(df: DataFrame):
-    try:
-        df[PITCH] = calc_pitch(acc_x_list=df[ACC_X], acc_y_list=df[ACC_Y], acc_z_list=df[ACC_Z], gyr_y_list=df[GYR_Y],
-                               alpha=0.98, dt=0.01)
+    def add_pitch(self, dt=0.01, alpha=0.98):
+        try:
+            self.data[PITCH] = calc_pitch(
+                acc_x_list=self.data[ACC_X],
+                acc_y_list=self.data[ACC_Y],
+                acc_z_list=self.data[ACC_Z],
+                gyr_y_list=self.data[GYR_Y],
+                alpha=alpha,
+                dt=dt
+            )
+        except KeyError as ke:
+            print(f"First calculate: {ke}")
+        return self
 
-    except KeyError as ke:
-        print(f"First calculete: {ke}")
-    return df
+    def add_roll(self, alpha=0.98):
+        try:
+            self.data[ROLL] = calc_roll(
+                acc_y_list=self.data[ACC_Y],
+                acc_z_list=self.data[ACC_Z],
+                gyr_x_list=self.data[GYR_X],
+                deltatime_list=self.data[DT],
+                alpha=alpha
+            )
+        except KeyError as ke:
+            print(f"First calculate: {ke}")
+        return self
 
+    def add_linear_acceleration(self):
+        try:
+            lin_acc_x, lin_acc_y, lin_acc_z = transform_to_linear_acceleration(
+                pitch=self.data[PITCH],
+                roll=self.data[ROLL],
+                acc_x=self.data[ACC_X],
+                acc_y=self.data[ACC_Y],
+                acc_z=self.data[ACC_Z]
+            )
+            self.data[LIN_ACC_X] = lin_acc_x
+            self.data[LIN_ACC_Y] = lin_acc_y
+            self.data[LIN_ACC_Z] = lin_acc_z
+        except KeyError as ke:
+            print(f"First calculate: {ke}")
+        return self
 
-def add_roll(df: DataFrame):
-    df[ROLL] = calc_roll(acc_y_list=df[ACC_Y], acc_z_list=df[ACC_Z], gyr_x_list=df[GYR_X], dt=0.01, alpha=0.98)
-    return df
+    def add_time_row(self, dt):
+        row_counts = self.data.shape[0]
+        self.data[TIME] = np.arange(0, row_counts * dt, dt)
+        return self
 
-
-def add_linear_acceleration(df: DataFrame):
-    try:
-        lin_acc_x, lin_acc_y, lin_acc_z = transform_to_linear_acceleration(pitch=df[PITCH], roll=df[ROLL],
-                                                                           acc_x=df[ACC_X],
-                                                                           acc_y=df[ACC_Y], acc_z=df[ACC_Z])
-        df[LIN_ACC_X] = lin_acc_x
-        df[LIN_ACC_Y] = lin_acc_y
-        df[LIN_ACC_Z] = lin_acc_z
-    except KeyError as ke:
-        print(f"First calculete: {ke}")
-    return df
-
-
-def add_time_row(df: DataFrame, dt):
-    row_counts = df.shape[0]
-    df[TIME] = np.arange(0, row_counts * dt, dt)
-    return df
-
-
-def add_magnitude(df: DataFrame):
-    df[MAGNITUDE] = calc_magnitude(df[LIN_ACC_X], df[LIN_ACC_Y], df[LIN_ACC_Z])
-    return df
-
-
-def plot_magnitude(df: DataFrame):
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    # linia 1 – JERK (duża skala)
-    fig.add_trace(go.Scatter(x=df[TIME], y=df[JERK], name="jerk"), secondary_y=False)
-
-    # linia 2 – ROLL (mała skala)
-    fig.add_trace(go.Scatter(x=df[TIME], y=df[ROLL], name="roll"), secondary_y=True)
-    fig.show()
+    def add_magnitude(self):
+        try:
+            self.data[MAGNITUDE] = calc_magnitude(
+                self.data[LIN_ACC_X],
+                self.data[LIN_ACC_Y],
+                self.data[LIN_ACC_Z]
+            )
+        except KeyError as ke:
+            print('First calculate linear_acceleration')
+        return self
 
 
 def plot_fft(df):
@@ -144,17 +162,6 @@ if __name__ == '__main__':
              }
     df = get_df_from_csv(r'C:\Users\apietka\PycharmProjects\accur8pool\data\rozbicieandrzej2.csv')
 
-    add_roll(df)
-    add_pitch(df)
-    add_linear_acceleration(df)
-    add_magnitude(df)
-    add_jerk(df, 0.01)
-    add_time_row(df, 0.01)
-
-    window = np.hanning(len(df[MAGNITUDE]))
-    acc_windowed = df[MAGNITUDE] * window
-
-    values = zip(df[MAGNITUDE], range(len(df[MAGNITUDE])))
-    print(list(values))
-    plt.plot(df[JERK])
-    plt.show()
+    data = DataFrameTransformations(df)
+    data.add_pitch().add_roll().add_linear_acceleration().add_magnitude().add_jerk().add_time_row(dt=0.01)
+    print(data)
