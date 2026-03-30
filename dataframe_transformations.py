@@ -1,167 +1,228 @@
-import numpy as np
 from matplotlib import pyplot as plt
+import plotly.graph_objects as go
 from pandas import DataFrame
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
 from const import *
 from utils import *
+from utils import _normalize, _smooth
 
 
+# ---------------------
+# Funkcja do wczytania CSV
+# ---------------------
 def get_df_from_csv(path):
     df = pd.read_csv(path)
     return df
 
 
+# ---------------------
+# Klasa transformacji
+# ---------------------
 class DataFrameTransformations:
     def __init__(self, data: DataFrame):
-        self.data = data
+        self.data = data.copy()  # pracujemy na kopii
 
-    def add_jerk(self):
+    def dt2sec(self):
         try:
-            self.data[JERK] = calc_jerk(
-                self.data[LIN_ACC_X],
-                self.data[LIN_ACC_Y],
-                self.data[LIN_ACC_Z],
-                self.data[DT]
-            )
-        except KeyError as ke:
-            print(f"First calculate: {ke}")
+            # Zabezpieczenie: dzielimy tylko jeśli dane są w ms (duże wartości)
+
+            self.data[DT] = self.data[DT] / 1000
+        except Exception as e:
+            print(f'Błąd zamiany DT z ms na sekundy: {e}')
         return self
 
-    def add_pitch(self, dt=0.01, alpha=0.98):
+    # usuń pierwszy wiersz
+    def drop_first_row(self):
+        self.data = self.data.iloc[1:].reset_index(drop=True)
+        return self
+
+    def normalize(self, columns):
+        for col in columns:
+            self.data[col] = _normalize(self.data[col])
+        return self
+
+    # oblicz pitch
+    def add_pitch(self, alpha=0.98):
         try:
             self.data[PITCH] = calc_pitch(
-                acc_x_list=self.data[ACC_X],
-                acc_y_list=self.data[ACC_Y],
-                acc_z_list=self.data[ACC_Z],
-                gyr_y_list=self.data[GYR_Y],
-                alpha=alpha,
-                dt=dt
+                acc_x_list=self.data[ACC_X].tolist(),
+                acc_y_list=self.data[ACC_Y].tolist(),
+                acc_z_list=self.data[ACC_Z].tolist(),
+                gyr_y_list=self.data[GYR_Y].tolist(),
+                dt_list=self.data[DT].tolist(),
+                alpha=alpha
             )
-        except KeyError as ke:
-            print(f"First calculate: {ke}")
+        except Exception as e:
+            print(f"Błąd obliczania pitch: {e}")
         return self
 
+    # oblicz roll
     def add_roll(self, alpha=0.98):
         try:
             self.data[ROLL] = calc_roll(
-                acc_y_list=self.data[ACC_Y],
-                acc_z_list=self.data[ACC_Z],
-                gyr_x_list=self.data[GYR_X],
-                deltatime_list=self.data[DT],
+                acc_y_list=self.data[ACC_Y].tolist(),
+                acc_z_list=self.data[ACC_Z].tolist(),
+                gyr_x_list=self.data[GYR_X].tolist(),
+                deltatime_list=self.data[DT].tolist(),
                 alpha=alpha
             )
-        except KeyError as ke:
-            print(f"First calculate: {ke}")
+        except Exception as e:
+            print(f"Błąd obliczania roll: {e}")
         return self
 
-    def add_linear_acceleration(self):
+    #
+    # # usuń grawitację → linear acceleration (ZWEKTORYZOWANE)
+    # def remove_gravity(self):
+    #     try:
+    #         pitch = self.data[PITCH].values
+    #         roll = self.data[ROLL].values
+    #
+    #         g = 9.81
+    #         # Obliczenie g_sensor (składowe grawitacji w układzie czujnika)
+    #         g_sensor_x = -g * np.sin(pitch)
+    #         g_sensor_y = g * np.sin(roll) * np.cos(pitch)
+    #         g_sensor_z = g * np.cos(roll) * np.cos(pitch)
+    #
+    #         self.data[LIN_ACC_X] = self.data[ACC_X] - g_sensor_x
+    #         self.data[LIN_ACC_Y] = self.data[ACC_Y] - g_sensor_y
+    #         self.data[LIN_ACC_Z] = self.data[ACC_Z] - g_sensor_z
+    #     except KeyError:
+    #         print("Najpierw oblicz pitch i roll")
+    #     except Exception as e:
+    #         print(f"Błąd remove_gravity: {e}")
+    #     return self
+
+    # oblicz magnitude
+    def add_magnitude(self, source_cols, new_col):
         try:
-            lin_acc_x, lin_acc_y, lin_acc_z = transform_to_linear_acceleration(
-                pitch=self.data[PITCH],
-                roll=self.data[ROLL],
-                acc_x=self.data[ACC_X],
-                acc_y=self.data[ACC_Y],
-                acc_z=self.data[ACC_Z]
+
+            self.data[new_col] = calc_magnitude(
+                self.data[source_cols[0]],
+                self.data[source_cols[1]],
+                self.data[source_cols[2]]
             )
-            self.data[LIN_ACC_X] = lin_acc_x
-            self.data[LIN_ACC_Y] = lin_acc_y
-            self.data[LIN_ACC_Z] = lin_acc_z
-        except KeyError as ke:
-            print(f"First calculate: {ke}")
+        except Exception as e:
+            print(f"Błąd add_magnitude: {e}")
         return self
 
-    def add_time_row(self, dt):
-        row_counts = self.data.shape[0]
-        self.data[TIME] = np.arange(0, row_counts * dt, dt)
-        return self
-
-    def add_magnitude(self):
+    # oblicz jerk (pochodna linear acceleration) - POPRAWIONE
+    def add_jerk(self, source_cols):
         try:
-            self.data[MAGNITUDE] = calc_magnitude(
-                self.data[LIN_ACC_X],
-                self.data[LIN_ACC_Y],
-                self.data[LIN_ACC_Z]
-            )
-        except KeyError as ke:
-            print('First calculate linear_acceleration')
+            # Do poprawnego działania np.gradient potrzebujemy osi czasu (TIME), nie delt (DT)
+            if TIME not in self.data.columns:
+                self.add_time_row()
+
+            time_axis = self.data[TIME].values
+
+            # Źródło danych do jerka
+            source_cols = source_cols
+
+            acc = self.data[source_cols].values
+
+            # np.gradient z podanym time_axis poprawnie oblicza d(acc)/dt
+            jerk = np.gradient(acc, time_axis, axis=0)
+
+            for i, col in enumerate(source_cols):
+                self.data[f"{JERK}_{col.split('_')[-1]}"] = jerk[:, i]
+
+            self.data[JERK + "_MAG"] = np.linalg.norm(jerk, axis=1)
+        except Exception as e:
+            print(f"Błąd add_jerk: {e}")
         return self
 
+    def lowpass_filter(self, columns: list, cutoff=8):
+        for column in columns:
+            self.data[column] = lowpass_filter(self.data[column], cutoff=cutoff)
+        return self
 
-def plot_fft(df):
-    N = df.shape[0]
-    for axis in ["accx", "accy", "accz"]:
-        signal = df[axis].values
-        fft_values = np.abs(np.fft.fft(signal)[:100 // 2])
-        fft_freq = np.fft.fftfreq(N, d=0.01)[:100 // 2]
-        plt.plot(fft_freq, fft_values, label=axis)
+    def smooth(self, columns, window):
+        for col in columns:
+            self.data[col] = _smooth(self.data[col], window=window)
+        return self
 
-    plt.xlabel("Częstotliwość [Hz]")
-    plt.ylabel("Amplituda")
-    plt.legend()
-    plt.show()
+    # dodaj kolumnę czasu w sekundach
+    def add_time_row(self):
+        try:
+            self.data[TIME] = np.cumsum(self.data[DT])
+        except Exception as e:
+            print(f'Bład obliczania TIME: {e}')
+        return self
 
+    # ustawienie wyświetlania
+    def set_display_max_data(self):
+        pd.set_option('display.max_rows', 100)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', None)
+        pd.set_option('display.max_colwidth', None)
 
-def plot_3d_motion(df: DataFrame):
-    vx = vy = vz = 0
-    vel_x = []
-    vel_y = []
-    vel_z = []
+    # wykres FFT
+    def plot_fft(self):
+        source_cols = [LIN_ACC_X, LIN_ACC_Y, LIN_ACC_Z]
+        if not all(c in self.data.columns for c in source_cols):
+            source_cols = [ACC_X, ACC_Y, ACC_Z]
 
-    for ax, ay, az, dt in zip(df[LIN_ACC_X], df[LIN_ACC_Y], df[LIN_ACC_Z], [0.01] * df.shape[0]):
-        vx += ax * dt
-        vy += ay * dt
-        vz += az * dt
+        N = self.data.shape[0]
+        dt_sec = self.data[DT].mean()
+        for axis, col in zip(["X", "Y", "Z"], source_cols):
+            signal = self.data[col].values
+            fft_values = np.abs(np.fft.fft(signal))[:N // 2]
+            fft_freqs = np.fft.fftfreq(N, d=dt_sec)[:N // 2]
+            plt.plot(fft_freqs, fft_values, label=axis)
 
-        # opcjonalnie: ZUPT, jeżeli mag < threshold
-        # if np.sqrt(ax**2 + ay**2 + az**2) < 0.3:
-        #     vx = vy = vz = 0
+        plt.xlabel("Częstotliwość [Hz]")
+        plt.ylabel("Amplituda")
+        plt.legend()
+        plt.show()
 
-        vel_x.append(vx)
-        vel_y.append(vy)
-        vel_z.append(vz)
-    df["vel_x"] = vel_x
-    df["vel_y"] = vel_y
-    df["vel_z"] = vel_z
+    # wykres
+    def plot_linear_acc(self):
+        fig = go.Figure()
+        time = self.data[TIME]
 
-    posx = posy = posz = 0
-    pos_x = []
-    pos_y = []
-    pos_z = []
+        source_cols = [LIN_ACC_X, LIN_ACC_Y, LIN_ACC_Z]
+        if not all(c in self.data.columns for c in source_cols):
+            source_cols = [ACC_X, ACC_Y, ACC_Z]
 
-    for vx, vy, vz, dt in zip(df["vel_x"], df["vel_y"], df["vel_z"], [0.01] * df.shape[0]):
-        posx += vx * dt
-        posy += vy * dt
-        posz += vz * dt
+        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[0]], mode='lines', name='X'))
+        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[1]], mode='lines', name='Y'))
+        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[2]], mode='lines', name='Z'))
 
-        pos_x.append(posx)
-        pos_y.append(posy)
-        pos_z.append(posz)
-
-    df["x"] = pos_x
-    df["y"] = pos_y
-    df["z"] = pos_z
-
-    fig = px.scatter_3d(
-        df,
-        x=df['x'],
-        y=df['y'],
-        z=df['z'],
-        color=TIME,
-
-    )
-    fig.show()
+        fig.update_layout(title="Linear acceleration",
+                          xaxis_title="Time [s]",
+                          yaxis_title="Acceleration [m/s^2]")
+        fig.show()
 
 
+# ---------------------
+# Pipeline
+# ---------------------
 if __name__ == '__main__':
-    paths = {'jarozbicie': r'C:\Users\apietka\PycharmProjects\accur8pool\data\andrzej rozbicie.csv',
-             'arek rozbicie': r'C:\Users\apietka\PycharmProjects\accur8pool\data\arek rozbicie.csv',
-             'andrzejwbicie': r'C:\Users\apietka\PycharmProjects\accur8pool\data\andrzejwbiciedosycmocne.csv'
-             }
-    df = get_df_from_csv(r'C:\Users\apietka\PycharmProjects\accur8pool\data\rozbicieandrzej2.csv')
+    path = r'C:\Users\apietka\PycharmProjects\accur8pool\data\data20260329_220029.csv'
+    try:
+        df = get_df_from_csv(path)
+        data = DataFrameTransformations(df)
+        (data.drop_first_row()
+         .dt2sec()
+         .lowpass_filter(columns=[ACC_X, ACC_Y, ACC_Z], cutoff=10)
+         .add_magnitude(source_cols=[ACC_X, ACC_Y, ACC_Z], new_col=ACC_MAGNITUDE)
+         .add_magnitude(source_cols=[GYR_X, GYR_Y, GYR_Z], new_col=GYR_MAGNITUDE)
+         .add_time_row()
+         .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
+         .add_roll()
+         .add_pitch()
+         .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
 
-    data = DataFrameTransformations(df)
-    data.add_pitch().add_roll().add_linear_acceleration().add_magnitude().add_jerk().add_time_row(dt=0.01)
-    print(data)
+         .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
+
+         )
+        data.set_display_max_data()
+
+        df_res = data.data
+        df_res = df_res.iloc[:-100]
+        print(df_res.head())
+        print(len(df_res['jerk_accz']))
+        fig = px.line(df_res, x=df_res[TIME], y=[ACC_MAGNITUDE, GYR_MAGNITUDE])
+
+        fig.show()
+    except Exception as e:
+        print(f"Błąd: {e}")

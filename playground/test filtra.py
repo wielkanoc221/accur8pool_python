@@ -1,59 +1,23 @@
 import pandas as pd
 import numpy as np
+import scipy
+from matplotlib import pyplot as plt
+from scipy.signal import butter
 
-from const import ROLL
+from const import *
+from dataframe_transformations import DataFrameTransformations
 
-df = pd.read_csv(r'../data/andrzej rozbicie.csv')
-
-dt = 0.01
-
-roll = 0
-pitch = 0
-
-roll_list = []
-pitch_list = []
-time = np.arange(stop=df.shape[0] * dt, step=dt)
-df['time'] = time
-df['magnitude'] = np.sqrt(df['accx'] ** 2 + df['accy'] ** 2, df['accz'] ** 2)
-for i in range(len(df)):
-    ax = df.accx[i]
-    ay = df.accy[i]
-    az = df.accz[i]
-
-    gx = df.gyrx[i]
-    gy = df.gyry[i]
-
-    # kąty z akcelerometru
-    roll_acc = np.arctan2(ay, az)
-    pitch_acc = np.arctan2(-ax, np.sqrt(ay ** 2 + az ** 2))
-
-    # integracja żyroskopu
-    roll = roll + gx * dt
-    pitch = pitch + gy * dt
-
-    # filtr komplementarny
-    roll = 0.98 * roll + 0.02 * roll_acc
-    pitch = 0.98 * pitch + 0.02 * pitch_acc
-
-    roll_list.append(roll)
-    pitch_list.append(pitch)
-
-df["roll"] = roll_list
-df["pitch"] = pitch_list
-
-import plotly.graph_objects as go
-import plotly.express as px
-
-# fig = go.Figure()
-#
-# fig = px.scatter_3d(
-#     df,
-#     x=np.cos(df.roll),
-#     y=np.sin(df.pitch),
-#     z=np.sin(df.roll),
-#
-#     color="time",
-# )
-#
-# fig.show()
-print(df.iloc[600:650][ROLL])
+df = pd.read_csv(r'C:\Users\apietka\PycharmProjects\accur8pool\data\data20260317_214122.csv')
+data = DataFrameTransformations(df)
+data.dt2sec().add_magnitude().add_jerk()
+probkowanie = 100
+dt = 0.1
+cuttoff = 0.5
+(b, a) = butter(4, cuttoff / (probkowanie / 2), btype='low')
+filtered_x = scipy.signal.filtfilt(b, a, data.data[ACC_Z])
+print(np.mean(filtered_x))
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
+ax3.plot(data.data[ACC_Z])
+ax1.plot(data.data[JERK + '_Z'])
+ax2.plot(filtered_x)
+plt.show()
