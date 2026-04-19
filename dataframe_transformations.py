@@ -56,14 +56,27 @@ class DataFrameTransformations:
             print(f"Błąd obliczania pitch: {e}")
         return self
 
+    def add_yaw(self):
+        self.data[YAW]= calc_yaw_complementary(
+            self.data[MAG_X],
+            self.data[MAG_Y],
+            self.data[MAG_Z],
+            self.data[GYR_Z],
+            self.data[ROLL],
+            self.data[PITCH],
+            self.data[DT]
+
+        )
+        return self
+
     # oblicz roll
     def add_roll(self, alpha=0.98):
         try:
             self.data[ROLL] = calc_roll(
-                acc_y_list=self.data[ACC_Y].tolist(),
-                acc_z_list=self.data[ACC_Z].tolist(),
-                gyr_x_list=self.data[GYR_X].tolist(),
-                deltatime_list=self.data[DT].tolist(),
+                acc_y=self.data[ACC_Y].tolist(),
+                acc_z=self.data[ACC_Z].tolist(),
+                gyr_x=self.data[GYR_X].tolist(),
+                dt=self.data[DT].tolist(),
                 alpha=alpha
             )
         except Exception as e:
@@ -207,6 +220,7 @@ if __name__ == '__main__':
          .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
          .add_roll()
          .add_pitch()
+        .add_yaw()
          .normalize([GYR_X, GYR_Y, GYR_Z, ROLL, PITCH, ACC_MAGNITUDE, GYR_MAGNITUDE])
 
          .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
