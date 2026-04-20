@@ -1,8 +1,6 @@
 from matplotlib import pyplot as plt
 import plotly.graph_objects as go
 from pandas import DataFrame
-import plotly.express as px
-from const import *
 from utils import *
 from utils import _normalize, _smooth
 
@@ -56,19 +54,6 @@ class DataFrameTransformations:
             print(f"Błąd obliczania pitch: {e}")
         return self
 
-    def add_yaw(self):
-        self.data[YAW]= calc_yaw_complementary(
-            self.data[MAG_X],
-            self.data[MAG_Y],
-            self.data[MAG_Z],
-            self.data[GYR_Z],
-            self.data[ROLL],
-            self.data[PITCH],
-            self.data[DT]
-
-        )
-        return self
-
     # oblicz roll
     def add_roll(self, alpha=0.98):
         try:
@@ -83,24 +68,27 @@ class DataFrameTransformations:
             print(f"Błąd obliczania roll: {e}")
         return self
 
-    def cut_by_time(self, timestart, timestop=None):
-        df = self.data
-
-        index_start = (df["time"] - timestart).abs().idxmin()
-
-        if timestop is not None:
-            index_stop = (df["time"] - timestop).abs().idxmin()
-
-            if index_start > index_stop:
-                index_start, index_stop = index_stop, index_start
-
-            indices_to_drop = df.loc[index_start:index_stop].index
-        else:
-            indices_to_drop = df.loc[index_start:].index
-
-        self.data = df.drop(index=indices_to_drop).reset_index(drop=True)
-
-        return self
+    #
+    # # usuń grawitację → linear acceleration (ZWEKTORYZOWANE)
+    # def remove_gravity(self):
+    #     try:
+    #         pitch = self.data[PITCH].values
+    #         roll = self.data[ROLL].values
+    #
+    #         g = 9.81
+    #         # Obliczenie g_sensor (składowe grawitacji w układzie czujnika)
+    #         g_sensor_x = -g * np.sin(pitch)
+    #         g_sensor_y = g * np.sin(roll) * np.cos(pitch)
+    #         g_sensor_z = g * np.cos(roll) * np.cos(pitch)
+    #
+    #         self.data[LIN_ACC_X] = self.data[ACC_X] - g_sensor_x
+    #         self.data[LIN_ACC_Y] = self.data[ACC_Y] - g_sensor_y
+    #         self.data[LIN_ACC_Z] = self.data[ACC_Z] - g_sensor_z
+    #     except KeyError:
+    #         print("Najpierw oblicz pitch i roll")
+    #     except Exception as e:
+    #         print(f"Błąd remove_gravity: {e}")
+    #     return self
 
     # oblicz magnitude
     def add_magnitude(self, source_cols, new_col):
@@ -115,6 +103,7 @@ class DataFrameTransformations:
             print(f"Błąd add_magnitude: {e}")
         return self
 
+    # oblicz jerk (pochodna linear acceleration) - POPRAWIONE
     def add_jerk(self, source_cols):
         try:
             # Do poprawnego działania np.gradient potrzebujemy osi czasu (TIME), nie delt (DT)
@@ -206,39 +195,32 @@ class DataFrameTransformations:
 # Pipeline
 # ---------------------
 if __name__ == '__main__':
-    path = r'data/danejaroty.csv'
+    path = r'C:\Users\apietka\PycharmProjects\accur8pool\data\data20260329_220029.csv'
     try:
         df = get_df_from_csv(path)
         data = DataFrameTransformations(df)
         (data.drop_first_row()
          .dt2sec()
-         .add_time_row()
-         .cut_by_time(1)
          .lowpass_filter(columns=[ACC_X, ACC_Y, ACC_Z], cutoff=10)
          .add_magnitude(source_cols=[ACC_X, ACC_Y, ACC_Z], new_col=ACC_MAGNITUDE)
          .add_magnitude(source_cols=[GYR_X, GYR_Y, GYR_Z], new_col=GYR_MAGNITUDE)
+         .add_time_row()
          .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
          .add_roll()
          .add_pitch()
-        .add_yaw()
-         .normalize([GYR_X, GYR_Y, GYR_Z, ROLL, PITCH, ACC_MAGNITUDE, GYR_MAGNITUDE])
+         .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
 
          .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
 
          )
-
         data.set_display_max_data()
 
         df_res = data.data
-        print(data.data.shape)
+        df_res = df_res.iloc[:-100]
+        print(df_res.head())
+        print(len(df_res['jerk_accz']))
+        fig = px.line(df_res, x=df_res[TIME], y=[ACC_MAGNITUDE, GYR_MAGNITUDE])
 
-        print(data.data.shape)
+        fig.show()
     except Exception as e:
         print(f"Błąd: {e}")
-    #     fig = px.line(df_res, x=df_res[TIME],
-    #                   y=[ACC_X, ACC_Y, ACC_Z, 'jerk_MAG', 'jerk_X', 'jerk_Y', 'jerk_Z', ROLL, PITCH, ACC_MAGNITUDE,
-    #                      GYR_MAGNITUDE])
-    #
-    #     fig.show()
-    # except Exception as e:
-    #     print(f"Błąd: {e}")
