@@ -54,18 +54,20 @@ def calc_roll(acc_y, acc_z, gyr_x, dt, alpha=0.98):
 
     return roll
 
+
 def calc_yaw_complementary(
-    mag_x_list,
-    mag_y_list,
-    mag_z_list,
-    gyr_z_list,
-    roll_list,
-    pitch_list,
-    deltatime_list,
-    alpha=0.98
+        mag_x_list,
+        mag_y_list,
+        mag_z_list,
+        gyr_z_list,
+        roll_list,
+        pitch_list,
+        deltatime_list,
+        alpha=0.98
 ):
     def wrap_angle_pi(angle):
         return (angle + np.pi) % (2 * np.pi) - np.pi
+
     yaw_est = 0.0
     yaw_list = []
 
@@ -95,9 +97,9 @@ def calc_yaw_complementary(
         mx_comp = mx * np.cos(pitch) + mz * np.sin(pitch)
 
         my_comp = (
-            mx * np.sin(roll) * np.sin(pitch)
-            + my * np.cos(roll)
-            - mz * np.sin(roll) * np.cos(pitch)
+                mx * np.sin(roll) * np.sin(pitch)
+                + my * np.cos(roll)
+                - mz * np.sin(roll) * np.cos(pitch)
         )
 
         # 3. Yaw z magnetometru
@@ -112,6 +114,7 @@ def calc_yaw_complementary(
 
     return yaw_list
 
+
 def _normalize(signal: np.ndarray) -> np.ndarray:
     arr = np.asarray(signal, dtype=float)
     min_val = np.min(arr)
@@ -121,7 +124,7 @@ def _normalize(signal: np.ndarray) -> np.ndarray:
     return (arr - min_val) / (max_val - min_val)
 
 
-def _smooth(signal: np.ndarray | pd.Series,window=5) -> np.ndarray:
+def _smooth(signal: np.ndarray | pd.Series, window=5) -> np.ndarray:
     arr = np.asarray(signal, dtype=float)
     if len(arr) < 3:
         return arr

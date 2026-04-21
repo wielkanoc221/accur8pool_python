@@ -1,3 +1,7 @@
+import os
+import time
+from pathlib import Path
+
 from matplotlib import pyplot as plt
 import plotly.graph_objects as go
 from pandas import DataFrame
@@ -194,33 +198,50 @@ class DataFrameTransformations:
 # ---------------------
 # Pipeline
 # ---------------------
+
+def transform_df(path: Path | str):
+    df = get_df_from_csv(path)
+    data_transformation = DataFrameTransformations(df)
+    (data_transformation.drop_first_row()
+     .dt2sec()
+     .lowpass_filter(columns=[ACC_X, ACC_Y, ACC_Z], cutoff=10)
+     .add_magnitude(source_cols=[ACC_X, ACC_Y, ACC_Z], new_col=ACC_MAGNITUDE)
+     .add_magnitude(source_cols=[GYR_X, GYR_Y, GYR_Z], new_col=GYR_MAGNITUDE)
+     .add_time_row()
+     .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
+     .add_roll()
+     .add_pitch()
+     .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
+
+     .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
+
+     )
+    return data_transformation.data
+
+
+def transform_files(dir: str | Path):
+    all_files = []
+    for dirpath, dirnames, filenames in os.walk(dir):
+        for filename in filenames:
+            all_files.append(os.path.join(dirpath, filename))
+    error_paths = []
+    for file in all_files:
+
+        try:
+            file = Path(file)
+            file_name = file.name
+            print(file_name)
+            df = transform_df(file)
+            #csv = df.to_csv()
+          #  print(type(csv))
+        except:
+            error_paths.append(file)
+
+    if error_paths:
+        print(error_paths)
+
+
 if __name__ == '__main__':
-    path = r'C:\Users\apietka\PycharmProjects\accur8pool\data\data20260329_220029.csv'
-    try:
-        df = get_df_from_csv(path)
-        data = DataFrameTransformations(df)
-        (data.drop_first_row()
-         .dt2sec()
-         .lowpass_filter(columns=[ACC_X, ACC_Y, ACC_Z], cutoff=10)
-         .add_magnitude(source_cols=[ACC_X, ACC_Y, ACC_Z], new_col=ACC_MAGNITUDE)
-         .add_magnitude(source_cols=[GYR_X, GYR_Y, GYR_Z], new_col=GYR_MAGNITUDE)
-         .add_time_row()
-         .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
-         .add_roll()
-         .add_pitch()
-         .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
-
-         .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
-
-         )
-        data.set_display_max_data()
-
-        df_res = data.data
-        df_res = df_res.iloc[:-100]
-        print(df_res.head())
-        print(len(df_res['jerk_accz']))
-        fig = px.line(df_res, x=df_res[TIME], y=[ACC_MAGNITUDE, GYR_MAGNITUDE])
-
-        fig.show()
-    except Exception as e:
-        print(f"Błąd: {e}")
+    x=time.time()
+    transform_files(r'C:\Users\apietka\PycharmProjects\accur8pool\data')
+    print(time.time()-x)
