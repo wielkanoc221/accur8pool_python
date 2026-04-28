@@ -1,247 +1,137 @@
-import os
-import time
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Sequence
 
-from matplotlib import pyplot as plt
-import plotly.graph_objects as go
+import numpy as np
+import pandas as pd
 from pandas import DataFrame
-from utils import *
-from utils import _normalize, _smooth
+
+from const import *
+from utils import (
+    _normalize,
+    _smooth,
+    calc_pitch,
+    calc_roll,
+    calc_magnitude,
+    lowpass_filter,
+)
 
 
-# ---------------------
-# Funkcja do wczytania CSV
-# ---------------------
-def get_df_from_csv(path):
-    df = pd.read_csv(path)
-    return df
+class DataFrameTransformer:
+    def __init__(self, data: DataFrame, copy: bool = True):
+        self.data = data.copy() if copy else data
 
-
-# ---------------------
-# Klasa transformacji
-# ---------------------
-class DataFrameTransformations:
-    def __init__(self, data: DataFrame):
-        self.data = data.copy()  # pracujemy na kopii
-
-    def dt2sec(self):
-        try:
-            # Zabezpieczenie: dzielimy tylko jeśli dane są w ms (duże wartości)
-
-            self.data[DT] = self.data[DT] / 1000
-        except Exception as e:
-            print(f'Błąd zamiany DT z ms na sekundy: {e}')
-        return self
-
-    # usuń pierwszy wiersz
-    def drop_first_row(self):
+    def drop_first_row(self) -> "DataFrameTransformer":
         self.data = self.data.iloc[1:].reset_index(drop=True)
         return self
 
-    def normalize(self, columns):
+    def dt_ms_to_sec(self, dt_col: str = DT) -> "DataFrameTransformer":
+        self.data[dt_col] = self.data[dt_col] / 1000.0
+        return self
+
+    def add_time(self, dt_col: str = DT, time_col: str = TIME) -> "DataFrameTransformer":
+        self.data[time_col] = self.data[dt_col].cumsum()
+        return self
+
+    def normalize(self, columns: Sequence[str]) -> "DataFrameTransformer":
         for col in columns:
             self.data[col] = _normalize(self.data[col])
         return self
 
-    # oblicz pitch
-    def add_pitch(self, alpha=0.98):
-        try:
-            self.data[PITCH] = calc_pitch(
-                acc_x_list=self.data[ACC_X].tolist(),
-                acc_y_list=self.data[ACC_Y].tolist(),
-                acc_z_list=self.data[ACC_Z].tolist(),
-                gyr_y_list=self.data[GYR_Y].tolist(),
-                dt_list=self.data[DT].tolist(),
-                alpha=alpha
-            )
-        except Exception as e:
-            print(f"Błąd obliczania pitch: {e}")
-        return self
-
-    # oblicz roll
-    def add_roll(self, alpha=0.98):
-        try:
-            self.data[ROLL] = calc_roll(
-                acc_y=self.data[ACC_Y].tolist(),
-                acc_z=self.data[ACC_Z].tolist(),
-                gyr_x=self.data[GYR_X].tolist(),
-                dt=self.data[DT].tolist(),
-                alpha=alpha
-            )
-        except Exception as e:
-            print(f"Błąd obliczania roll: {e}")
-        return self
-
-    #
-    # # usuń grawitację → linear acceleration (ZWEKTORYZOWANE)
-    # def remove_gravity(self):
-    #     try:
-    #         pitch = self.data[PITCH].values
-    #         roll = self.data[ROLL].values
-    #
-    #         g = 9.81
-    #         # Obliczenie g_sensor (składowe grawitacji w układzie czujnika)
-    #         g_sensor_x = -g * np.sin(pitch)
-    #         g_sensor_y = g * np.sin(roll) * np.cos(pitch)
-    #         g_sensor_z = g * np.cos(roll) * np.cos(pitch)
-    #
-    #         self.data[LIN_ACC_X] = self.data[ACC_X] - g_sensor_x
-    #         self.data[LIN_ACC_Y] = self.data[ACC_Y] - g_sensor_y
-    #         self.data[LIN_ACC_Z] = self.data[ACC_Z] - g_sensor_z
-    #     except KeyError:
-    #         print("Najpierw oblicz pitch i roll")
-    #     except Exception as e:
-    #         print(f"Błąd remove_gravity: {e}")
-    #     return self
-
-    # oblicz magnitude
-    def add_magnitude(self, source_cols, new_col):
-        try:
-
-            self.data[new_col] = calc_magnitude(
-                self.data[source_cols[0]],
-                self.data[source_cols[1]],
-                self.data[source_cols[2]]
-            )
-        except Exception as e:
-            print(f"Błąd add_magnitude: {e}")
-        return self
-
-    # oblicz jerk (pochodna linear acceleration) - POPRAWIONE
-    def add_jerk(self, source_cols):
-        try:
-            # Do poprawnego działania np.gradient potrzebujemy osi czasu (TIME), nie delt (DT)
-            if TIME not in self.data.columns:
-                self.add_time_row()
-
-            time_axis = self.data[TIME].values
-
-            # Źródło danych do jerka
-            source_cols = source_cols
-
-            acc = self.data[source_cols].values
-
-            # np.gradient z podanym time_axis poprawnie oblicza d(acc)/dt
-            jerk = np.gradient(acc, time_axis, axis=0)
-
-            for i, col in enumerate(source_cols):
-                self.data[f"{JERK}_{col.split('_')[-1]}"] = jerk[:, i]
-
-            self.data[JERK + "_MAG"] = np.linalg.norm(jerk, axis=1)
-        except Exception as e:
-            print(f"Błąd add_jerk: {e}")
-        return self
-
-    def lowpass_filter(self, columns: list, cutoff=8):
-        for column in columns:
-            self.data[column] = lowpass_filter(self.data[column], cutoff=cutoff)
-        return self
-
-    def smooth(self, columns, window):
+    def smooth(self, columns: Sequence[str], window: int) -> "DataFrameTransformer":
         for col in columns:
             self.data[col] = _smooth(self.data[col], window=window)
         return self
 
-    # dodaj kolumnę czasu w sekundach
-    def add_time_row(self):
-        try:
-            self.data[TIME] = np.cumsum(self.data[DT])
-        except Exception as e:
-            print(f'Bład obliczania TIME: {e}')
+    def lowpass(self, columns: Sequence[str], cutoff: float) -> "DataFrameTransformer":
+        for col in columns:
+            self.data[col] = lowpass_filter(self.data[col], cutoff=cutoff)
         return self
 
-    # ustawienie wyświetlania
-    def set_display_max_data(self):
-        pd.set_option('display.max_rows', 100)
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.width', None)
-        pd.set_option('display.max_colwidth', None)
+    def add_magnitude(
+            self,
+            source_cols: Sequence[str],
+            new_col: str,
+    ) -> "DataFrameTransformer":
+        if len(source_cols) != 3:
+            raise ValueError("source_cols musi mieć dokładnie 3 kolumny: x, y, z")
 
-    # wykres FFT
-    def plot_fft(self):
-        source_cols = [LIN_ACC_X, LIN_ACC_Y, LIN_ACC_Z]
-        if not all(c in self.data.columns for c in source_cols):
-            source_cols = [ACC_X, ACC_Y, ACC_Z]
+        self.data[new_col] = calc_magnitude(
+            self.data[source_cols[0]],
+            self.data[source_cols[1]],
+            self.data[source_cols[2]],
+        )
+        return self
 
-        N = self.data.shape[0]
-        dt_sec = self.data[DT].mean()
-        for axis, col in zip(["X", "Y", "Z"], source_cols):
-            signal = self.data[col].values
-            fft_values = np.abs(np.fft.fft(signal))[:N // 2]
-            fft_freqs = np.fft.fftfreq(N, d=dt_sec)[:N // 2]
-            plt.plot(fft_freqs, fft_values, label=axis)
+    def add_jerk(
+            self,
+            source_cols: Sequence[str],
+            time_col: str = TIME,
+            prefix: str = JERK,
+    ) -> "DataFrameTransformer":
+        if time_col not in self.data.columns:
+            self.add_time()
 
-        plt.xlabel("Częstotliwość [Hz]")
-        plt.ylabel("Amplituda")
-        plt.legend()
-        plt.show()
+        acc = self.data[list(source_cols)].to_numpy()
+        time_axis = self.data[time_col].to_numpy()
 
-    # wykres
-    def plot_linear_acc(self):
-        fig = go.Figure()
-        time = self.data[TIME]
+        jerk = np.gradient(acc, time_axis, axis=0)
 
-        source_cols = [LIN_ACC_X, LIN_ACC_Y, LIN_ACC_Z]
-        if not all(c in self.data.columns for c in source_cols):
-            source_cols = [ACC_X, ACC_Y, ACC_Z]
+        for i, col in enumerate(source_cols):
+            suffix = col.split("_")[-1]
+            self.data[f"{prefix}_{suffix}"] = jerk[:, i]
 
-        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[0]], mode='lines', name='X'))
-        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[1]], mode='lines', name='Y'))
-        fig.add_trace(go.Scatter(x=time, y=self.data[source_cols[2]], mode='lines', name='Z'))
+        self.data[f"{prefix}_MAG"] = np.linalg.norm(jerk, axis=1)
+        return self
 
-        fig.update_layout(title="Linear acceleration",
-                          xaxis_title="Time [s]",
-                          yaxis_title="Acceleration [m/s^2]")
-        fig.show()
+    def add_roll(self, alpha: float = 0.98) -> "DataFrameTransformer":
+        self.data[ROLL] = calc_roll(
+            acc_y=self.data[ACC_Y].tolist(),
+            acc_z=self.data[ACC_Z].tolist(),
+            gyr_x=self.data[GYR_X].tolist(),
+            dt=self.data[DT].tolist(),
+            alpha=alpha,
+        )
+        return self
 
+    def add_pitch(self, alpha: float = 0.98) -> "DataFrameTransformer":
+        self.data[PITCH] = calc_pitch(
+            acc_x_list=self.data[ACC_X].tolist(),
+            acc_y_list=self.data[ACC_Y].tolist(),
+            acc_z_list=self.data[ACC_Z].tolist(),
+            gyr_y_list=self.data[GYR_Y].tolist(),
+            dt_list=self.data[DT].tolist(),
+            alpha=alpha,
+        )
+        return self
 
-# ---------------------
-# Pipeline
-# ---------------------
+    def drop_columns_ending_with(self, suffix: str) -> "DataFrameTransformer":
+        self.data = self.data.loc[:, ~self.data.columns.str.endswith(suffix)]
+        return self
 
-def transform_df(path: Path | str):
-    df = get_df_from_csv(path)
-    data_transformation = DataFrameTransformations(df)
-    (data_transformation.drop_first_row()
-     .dt2sec()
-     .lowpass_filter(columns=[ACC_X, ACC_Y, ACC_Z], cutoff=10)
-     .add_magnitude(source_cols=[ACC_X, ACC_Y, ACC_Z], new_col=ACC_MAGNITUDE)
-     .add_magnitude(source_cols=[GYR_X, GYR_Y, GYR_Z], new_col=GYR_MAGNITUDE)
-     .add_time_row()
-     .add_jerk(source_cols=[ACC_X, ACC_Y, ACC_Z])
-     .add_roll()
-     .add_pitch()
-     .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
-
-     .smooth([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, 'jerk_MAG', 'roll', 'pitch'], window=5)
-
-     )
-    return data_transformation.data
+    def result(self) -> DataFrame:
+        return self.data
 
 
-def transform_files(dir: str | Path):
-    all_files = []
-    for dirpath, dirnames, filenames in os.walk(dir):
-        for filename in filenames:
-            all_files.append(os.path.join(dirpath, filename))
-    error_paths = []
-    for file in all_files:
+def transform_df(path: Path | str) -> pd.DataFrame:
+    df = pd.read_csv(path)
 
-        try:
-            file = Path(file)
-            file_name = file.name
-            print(file_name)
-            df = transform_df(file)
-            #csv = df.to_csv()
-          #  print(type(csv))
-        except:
-            error_paths.append(file)
-
-    if error_paths:
-        print(error_paths)
-
-
-if __name__ == '__main__':
-    x=time.time()
-    transform_files(r'C:\Users\apietka\PycharmProjects\accur8pool\data')
-    print(time.time()-x)
+    return (
+        DataFrameTransformer(df)
+        .drop_first_row()
+        .dt_ms_to_sec()
+        .lowpass([ACC_X, ACC_Y, ACC_Z], cutoff=10)
+        .add_magnitude([ACC_X, ACC_Y, ACC_Z], ACC_MAGNITUDE)
+        .add_magnitude([GYR_X, GYR_Y, GYR_Z], GYR_MAGNITUDE)
+        .add_time()
+        .add_jerk([ACC_X, ACC_Y, ACC_Z])
+        .add_roll()
+        .add_pitch()
+        .normalize([ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE])
+        .smooth(
+            [ACC_X, ACC_Y, ACC_Z, ACC_MAGNITUDE, GYR_MAGNITUDE, f"{JERK}_MAG", ROLL, PITCH],
+            window=5,
+        )
+        .result()
+    )
