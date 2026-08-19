@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.spec
+
+# Wirtualne srodowiska
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+
+# Dane pomiarowe - nie trzymamy w repo
+data/
+data1/
+*.csv
+
+# Wygenerowane wykresy / modele
+*.html
+*.json.model
+pipeline_config.json
+
+# Testy / narzedzia
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

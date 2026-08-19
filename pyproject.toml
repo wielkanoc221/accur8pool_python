@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "accur8pool"
+version = "0.1.0"
+description = "Detekcja i klasyfikacja faz uderzenia bilardowego na podstawie danych IMU z zegarka"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "xgboost",
+    "plotly",
+    "dash",
+    "polars",
+    "pyarrow",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "nbstripout"]
+
+[tool.setuptools.packages.find]
+include = ["accur8pool*"]
+
+[tool.ruff]
+line-length = 120

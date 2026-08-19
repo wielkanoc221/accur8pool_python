@@ -1,0 +1,9 @@
+dash
+numpy
+pandas
+plotly
+polars
+pyarrow
+scikit-learn
+scipy
+xgboost
