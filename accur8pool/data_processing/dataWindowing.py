@@ -108,12 +108,29 @@ class DataWindowing:
         return extracted, windowed_label
 
     def reverse_window_labels(self, windows, y_len):
+        """
+        Rozwija etykiety okien z powrotem na pojedyncze probki.
+
+        Miejsce zapisu zalezy od strategii etykietowania: CenterLabelingStrategy
+        opisuje srodek okna, wiec etykieta idzie na srodek, a nie na jego poczatek
+        (inaczej caly wynik jest przesuniety o polowe okna).
+        """
         restored = np.zeros(y_len)
 
+        if len(windows) == 0:
+            return restored
+
+        offset = self.labeling_strategy.label_offset(self.window_size)
+        span = self.window_step if offset else self.window_size
+
         for index, window in enumerate(windows):
-            start = index * self.window_step
-            stop = start + self.window_size
-            restored[start:stop] = window
+            start = index * self.window_step + offset
+            restored[start:start + span] = window
+
+        # glowa i ogon sygnalu, ktorych nie pokrywa zadne okno
+        last_covered = min(y_len, (len(windows) - 1) * self.window_step + offset + span)
+        restored[:offset] = restored[offset] if offset < y_len else 0
+        restored[last_covered:] = restored[last_covered - 1]
 
         return restored
 
@@ -149,6 +166,10 @@ class LabelStrategy(ABC):
     def get_label(self, windowed_labels):
         pass
 
+    def label_offset(self, window_size: int) -> int:
+        """Przesuniecie probki, ktora opisuje etykieta okna, wzgledem jego poczatku."""
+        return 0
+
 
 class LabelMajorityStrategy(LabelStrategy):
     def __init__(self, mainlabel=1, threshold=0.7):
@@ -164,6 +185,9 @@ class LabelMajorityStrategy(LabelStrategy):
 
 
 class CenterLabelingStrategy(LabelStrategy):
+
+    def label_offset(self, window_size: int) -> int:
+        return window_size // 2
 
     def get_label(self, windowed_labels):
         half = len(windowed_labels) // 2
