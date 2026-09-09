@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import balanced_accuracy_score, classification_report, f1_score
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
@@ -36,32 +37,99 @@ class XGBPipeline:
         return pipeline
 
     def fit(self, X_data, y_data: pd.Series, summary_path: str | Path = "pipeline_config.json"):
+        """Uczy na SUROWYCH danych - transformacja jest robiona w srodku."""
         X_data = transform_raw_df(X_data)[self.DATA_COLUMNS]
         y_data = y_data.fillna(0)
         stop_idx_train = int(len(X_data) * 0.8)
 
-        X_train, y_train = X_data[:stop_idx_train], y_data[:stop_idx_train]
-        X_eval, y_eval = X_data[stop_idx_train:], y_data[stop_idx_train:]
+        self.fit_prepared(
+            X_train=X_data[:stop_idx_train],
+            y_train=y_data[:stop_idx_train],
+            X_eval=X_data[stop_idx_train:],
+            y_eval=y_data[stop_idx_train:],
+            summary_path=summary_path,
+        )
 
-        X_train_windowed, y_train_windowed = self.windowing.window_with_extractions(X_train.to_numpy(),
-                                                                                    y_train.to_numpy())
-        X_eval_windowed, y_eval_windowed = self.windowing.window_with_extractions(X_eval.to_numpy(), y_eval.to_numpy())
+    def fit_prepared(
+            self,
+            X_train: pd.DataFrame,
+            y_train: pd.Series,
+            X_eval: pd.DataFrame,
+            y_eval: pd.Series,
+            summary_path: str | Path | None = "pipeline_config.json",
+            verbose: bool | int = 2,
+    ) -> None:
+        """Uczy na danych juz przepuszczonych przez transform_raw_df (katalog prepared)."""
+        X_train_windowed, y_train_windowed = self.windowing.window_with_extractions(
+            X_train[self.DATA_COLUMNS].to_numpy(), np.asarray(y_train)
+        )
+        X_eval_windowed, y_eval_windowed = self.windowing.window_with_extractions(
+            X_eval[self.DATA_COLUMNS].to_numpy(), np.asarray(y_eval)
+        )
+
+        if len(X_train_windowed) == 0:
+            raise ValueError(
+                f'Zbior treningowy jest krotszy niz okno ({self.windowing.window_size} probek)'
+            )
 
         weights = self.sqrt_balanced_weights(y_train_windowed)
 
-        self.model.fit(X_train_windowed, y_train_windowed,
-                       eval_set=[(X_eval_windowed, y_eval_windowed)], verbose=2, sample_weight=weights)
+        self.model.fit(
+            X_train_windowed,
+            y_train_windowed,
+            eval_set=[(X_eval_windowed, y_eval_windowed)],
+            verbose=verbose,
+            sample_weight=weights,
+        )
 
-        self._make_fit_summary(summary_path)
+        if summary_path is not None:
+            self._make_fit_summary(summary_path)
 
-    def predict(self, X_data: pd.DataFrame):
-        prepared = transform_raw_df(X_data)[self.DATA_COLUMNS]
-        windowed = self.windowing.window(prepared.to_numpy())
+    def evaluate_prepared(self, X: pd.DataFrame, y: pd.Series) -> dict:
+        """Metryki liczone na poziomie okien, tak jak uczony jest model."""
+        X_windowed, y_windowed = self.windowing.window_with_extractions(
+            X[self.DATA_COLUMNS].to_numpy(), np.asarray(y)
+        )
+
+        if len(X_windowed) == 0:
+            raise ValueError(f'Zbior jest krotszy niz okno ({self.windowing.window_size} probek)')
+
+        y_pred = self.model.predict(X_windowed)
+
+        return {
+            'n_windows': int(len(y_windowed)),
+            'f1_weighted': float(f1_score(y_true=y_windowed, y_pred=y_pred, average='weighted')),
+            'balanced_accuracy': float(balanced_accuracy_score(y_true=y_windowed, y_pred=y_pred)),
+            'per_class': classification_report(
+                y_true=y_windowed, y_pred=y_pred, output_dict=True, zero_division=0
+            ),
+        }
+
+    def predict(self, X_data: pd.DataFrame, min_group_size: int = 6):
+        """Predykcja na SUROWYCH danych - transformacja jest robiona w srodku."""
+        return self.predict_prepared(transform_raw_df(X_data), min_group_size=min_group_size)
+
+    def predict_prepared(self, prepared: pd.DataFrame, min_group_size: int = 6):
+        """
+        Predykcja na danych juz przygotowanych.
+
+        Zwraca etykiete dla kazdego wiersza wejscia (okna sa rozwijane z powrotem
+        na probki), wiec dlugosc wyniku jest rowna len(prepared).
+        """
+        features = prepared[self.DATA_COLUMNS]
+
+        if len(features) < self.windowing.window_size:
+            raise ValueError(
+                f'Dane maja {len(features)} probek, a okno wymaga co najmniej '
+                f'{self.windowing.window_size}'
+            )
+
+        windowed = self.windowing.window(features.to_numpy())
         featured = extractWindowFeatures(windows=windowed)
         y_pred = self.model.predict(featured)
-        smoothed = self.smooth(y_pred=y_pred, min_group_size=6)
-        reversed_ = self.windowing.reverse_window_labels(smoothed, len(prepared))
-        return reversed_
+        smoothed = self.smooth(y_pred=y_pred, min_group_size=min_group_size)
+
+        return self.windowing.reverse_window_labels(smoothed, len(features))
 
     @staticmethod
     def calc_class_weights(y_train_windowed):
