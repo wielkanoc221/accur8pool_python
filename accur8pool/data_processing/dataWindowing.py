@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+
 import numpy as np
 from numpy.fft import rfft
 
@@ -8,10 +9,10 @@ from numpy.fft import rfft
 class DataWindowing:
     def __init__(self, window_size: int = 1000,
                  window_step: int = 1,
-                 window_labeling_strategy: LabelStrategy = None,
+                 window_labeling_strategy: LabelStrategy | None = None,
                  ):
         self.window_size = window_size
-        self.labeling_strategy: LabelStrategy = LabelMajorityStrategy() if not window_labeling_strategy else window_labeling_strategy
+        self.labeling_strategy: LabelStrategy = window_labeling_strategy or LabelMajorityStrategy()
         self.window_step = window_step
         self._validate()
 
@@ -63,16 +64,17 @@ class DataWindowing:
 
     def window(self, datas: np.ndarray, labels: np.ndarray = None):
 
+        if not isinstance(datas, np.ndarray):
+            raise ValueError(f'X musi byc typu np.ndarray, otrzymano {type(datas)}')
+
+        if labels is not None and not isinstance(labels, np.ndarray):
+            raise ValueError(f'y musi byc typu np.ndarray, otrzymano {type(labels)}')
+
         if labels is not None and datas.shape[0] != labels.shape[0]:
             raise ValueError(
                 f"dane są różnych rozmiarów: "
                 f"data={datas.shape[0]}, label={labels.shape[0]}"
             )
-        if not isinstance(datas, np.ndarray):
-            raise ValueError(f'X musi byc typu np.ndarray, otrzymano {type(datas)}')
-
-        if labels is not None and not isinstance(labels, np.ndarray):
-            raise ValueError(f'ymusi byc typu np.ndarray, otrzymano {type(labels)}')
 
         X_win = []
         y_win = []
@@ -106,14 +108,14 @@ class DataWindowing:
         return extracted, windowed_label
 
     def reverse_window_labels(self, windows, y_len):
-        reversed = np.zeros(y_len)
+        restored = np.zeros(y_len)
 
         for index, window in enumerate(windows):
             start = index * self.window_step
             stop = start + self.window_size
-            reversed[start:stop] = window
+            restored[start:stop] = window
 
-        return reversed
+        return restored
 
     def get_params(self):
         return {
@@ -125,7 +127,7 @@ def extractWindowFeatures(windows):
     if not isinstance(windows, np.ndarray):
         raise ValueError(f'windows musi byc typu np.ndarray a jest {type(windows)}')
     if windows.ndim != 3:
-        raise ValueError(f'windows musi byc 3 wymiarowa [n_windows,rows,cols]')
+        raise ValueError('windows musi byc 3 wymiarowa [n_windows,rows,cols]')
 
     mean = windows.mean(axis=1)
     std = windows.std(axis=1)

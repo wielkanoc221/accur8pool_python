@@ -1,12 +1,14 @@
 import dataclasses
 import json
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from xgboost import XGBClassifier
-from accur8pool.data_processing.dataWindowing import DataWindowing, extractWindowFeatures, CenterLabelingStrategy
 from sklearn.utils.class_weight import compute_sample_weight
+from xgboost import XGBClassifier
+
+from accur8pool.data_processing.dataWindowing import CenterLabelingStrategy, DataWindowing, extractWindowFeatures
 from accur8pool.data_processing.prepare_raw_data import transform_raw_df
 
 
@@ -24,10 +26,16 @@ class XGBPipeline:
         self.model: XGBClassifier = model
 
     @staticmethod
-    def load_model(path):
-        pass
+    def load_model(path: str | Path) -> "XGBPipeline":
+        with open(path, "rb") as f:
+            pipeline = pickle.load(f)
 
-    def fit(self, X_data, y_data: pd.Series):
+        if not isinstance(pipeline, XGBPipeline):
+            raise TypeError(f"{path} nie zawiera XGBPipeline, tylko {type(pipeline)}")
+
+        return pipeline
+
+    def fit(self, X_data, y_data: pd.Series, summary_path: str | Path = "pipeline_config.json"):
         X_data = transform_raw_df(X_data)[self.DATA_COLUMNS]
         y_data = y_data.fillna(0)
         stop_idx_train = int(len(X_data) * 0.8)
@@ -44,7 +52,7 @@ class XGBPipeline:
         self.model.fit(X_train_windowed, y_train_windowed,
                        eval_set=[(X_eval_windowed, y_eval_windowed)], verbose=2, sample_weight=weights)
 
-        self._make_fit_summary()
+        self._make_fit_summary(summary_path)
 
     def predict(self, X_data: pd.DataFrame):
         prepared = transform_raw_df(X_data)[self.DATA_COLUMNS]
@@ -59,14 +67,9 @@ class XGBPipeline:
     def calc_class_weights(y_train_windowed):
         counts = pd.Series(y_train_windowed).value_counts()
         row_count = y_train_windowed.shape[0]
-        weights = {c: row_count / counts[c] * len(counts) for c in counts.keys()}
-        sample_weights = [weights[l] for l in y_train_windowed]
+        weights = {c: row_count / counts[c] * len(counts) for c in counts}
+        sample_weights = [weights[label] for label in y_train_windowed]
         return sample_weights
-
-    @staticmethod
-    def calc_weights(y):
-        weights = compute_sample_weight(y)
-        return weights
 
     @staticmethod
     def sqrt_balanced_weights(y):
@@ -112,16 +115,20 @@ class XGBPipeline:
 
         return weights
 
-    def _make_fit_summary(self):
-        model_params = self.model.get_params()
-        window_params = self.windowing.get_params()
+    def _make_fit_summary(self, path: str | Path = "pipeline_config.json") -> dict:
+        summary = {
+            'model_params': self.model.get_params(),
+            'window_params': self.windowing.get_params(),
+        }
 
-        summary = {'model_params': model_params, 'window_params': window_params}
-        with open("pipeline_config.json", "w+", encoding="utf-8") as f:
-            json.dump(summary, f, indent=4)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=4, default=str)
 
-    def save_model(self, path):
-        pickle.dump(self, open(path, 'wb+'))
+        return summary
+
+    def save_model(self, path: str | Path) -> None:
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
 
 
 @dataclasses.dataclass
@@ -131,9 +138,9 @@ class PipelineInit:
     window_step: int = 2
     model_n_estimators: int = 2000
     model_early_stopping_rounds: int = 20
-    eval_metric: str = 'mlogloss',
-    objective: str = "multi:softprob",
-    num_class: int = 5,
+    eval_metric: str = 'mlogloss'
+    objective: str = "multi:softprob"
+    num_class: int = 5
 
 
 # {'max_depth': 5, 'subsample': 0.8, 'learning_rate': 0.2}
