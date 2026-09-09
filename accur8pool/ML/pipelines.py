@@ -1,4 +1,7 @@
+import dataclasses
 import json
+import pickle
+
 import numpy as np
 import pandas as pd
 from xgboost import XGBClassifier
@@ -20,7 +23,8 @@ class XGBPipeline:
         self.windowing: DataWindowing = windowing
         self.model: XGBClassifier = model
 
-    def load_model(self):
+    @staticmethod
+    def load_model(path):
         pass
 
     def fit(self, X_data, y_data: pd.Series):
@@ -116,21 +120,37 @@ class XGBPipeline:
         with open("pipeline_config.json", "w+", encoding="utf-8") as f:
             json.dump(summary, f, indent=4)
 
+    def save_model(self, path):
+        pickle.dump(self, open(path, 'wb+'))
 
-def make_pipeline():
-    window = DataWindowing(window_size=20, window_step=2, window_labeling_strategy=CenterLabelingStrategy())
-    params = {'max_depth': 5, 'subsample': 0.8, 'learning_rate': 0.2}
+
+@dataclasses.dataclass
+class PipelineInit:
+    model_params: dict
+    window_size: int = 20
+    window_step: int = 2
+    model_n_estimators: int = 2000
+    model_early_stopping_rounds: int = 20
+    eval_metric: str = 'mlogloss',
+    objective: str = "multi:softprob",
+    num_class: int = 5,
+
+
+# {'max_depth': 5, 'subsample': 0.8, 'learning_rate': 0.2}
+def make_pipeline(init: PipelineInit):
+    window = DataWindowing(window_size=init.window_size, window_step=init.window_step,
+                           window_labeling_strategy=CenterLabelingStrategy())
+    params = dict(init.model_params)
     model = XGBClassifier(
-        n_estimators=2000,
-        early_stopping_rounds=20,
-        eval_metric='mlogloss',
-        objective="multi:softprob",
-        num_class=5,
+        n_estimators=init.model_n_estimators,
+        early_stopping_rounds=init.model_early_stopping_rounds,
+        eval_metric=init.eval_metric,
+        objective=init.objective,
+        num_class=init.num_class,
         **params,
     )
     pipeline = XGBPipeline(windowing=window, model=model)
     return pipeline
-
 
 # if __name__ == '__main__':
 #     from accur8pool.files_utils.filesManager import FilesManager

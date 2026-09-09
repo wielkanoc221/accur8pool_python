@@ -12,6 +12,7 @@ PathPairs: TypeAlias = list[PathPair]
 
 class PandasDataFrameLoader:
 
+
     @staticmethod
     def concat_datas_with_labels(data_labels_list: list[tuple[pd.DataFrame, pd.DataFrame]]) -> pd.DataFrame:
         """
