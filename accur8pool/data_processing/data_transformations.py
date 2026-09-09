@@ -1,15 +1,28 @@
 from __future__ import annotations
 
 from typing import Sequence
+
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from .const import *
+
+from .const import (
+    ACC_X,
+    ACC_Y,
+    ACC_Z,
+    GYR_X,
+    GYR_Y,
+    JERK,
+    PITCH,
+    ROLL,
+    TIME,
+    TIMESTAMP,
+)
 from .utils import (
     _normalize,
+    calc_magnitude,
     calc_pitch,
     calc_roll,
-    calc_magnitude,
     lowpass_filter,
 )
 
@@ -44,14 +57,21 @@ class DataFrameTransformerBase:
         self.new_columns.append(time_col)
         return self
 
-    def normalize(self, columns: Sequence[str] = None) -> "DataFrameTransformerBase":
+    def normalize(self, columns: Sequence[str] | None = None) -> "DataFrameTransformerBase":
         """
         Jezeli columns is None to bierze wszystkie kolumny
         z datafram z wykluczeniem TIME i DT
         """
         if columns is None:
-            columns = self.data.columns
-            columns = [column for column in columns if column not in [TIME, TIMESTAMP]]
+            columns = [
+                column for column in self.data.select_dtypes(include="number").columns
+                if column not in (TIME, TIMESTAMP)
+            ]
+
+        columns = list(columns)
+        missing = [column for column in columns if column not in self.data.columns]
+        if missing:
+            raise KeyError(f"Brakujace kolumny do normalizacji: {missing}")
 
         self.data[columns] = self.data[columns].apply(_normalize)
         return self
@@ -66,6 +86,9 @@ class DataFrameTransformerBase:
 
     def lowpass(self, columns: Sequence[str], cutoff: float) -> "DataFrameTransformerBase":
         for col in columns:
+            if self.data[col].isna().any():
+                raise ValueError(f"Kolumna {col} zawiera NaN - filtfilt zwrocilby same NaN-y")
+
             self.data[col] = lowpass_filter(self.data[col], cutoff=cutoff)
         return self
 
@@ -135,18 +158,16 @@ class DataFrameTransformerBase:
 
 
 class DataFrameTransformerV2(DataFrameTransformerBase):
-    def __init__(self, data: DataFrame, copy: bool = True):
-        super().__init__(data, copy)
-
-    def add_time(self, dt_col: str = TIMESTAMP, time_col: str = TIME) -> "DataFrameTransformerBase":
-        dt_ns = self.data[TIMESTAMP].diff()
-        dt_ns[0] = 0
-        self.data[TIMESTAMP] = dt_ns / 1_000_000
-        self.data[time_col] = self.data[TIMESTAMP].cumsum()
+    def add_time(self, dt_col: str = TIMESTAMP, time_col: str = TIME) -> "DataFrameTransformerV2":
+        deltas = self.data[dt_col].diff().fillna(0.0)
+        self.data[dt_col] = deltas / 1_000_000
+        self.data[time_col] = self.data[dt_col].cumsum()
+        if time_col not in self.new_columns:
+            self.new_columns.append(time_col)
 
         return self
 
-    def add_roll(self, alpha: float = 0.98) -> "DataFrameTransformerBase":
+    def add_roll(self, alpha: float = 0.98) -> "DataFrameTransformerV2":
         self.data[ROLL + '_calculated'] = calc_roll(
             acc_y=self.data[ACC_Y].tolist(),
             acc_z=self.data[ACC_Z].tolist(),
@@ -156,7 +177,7 @@ class DataFrameTransformerV2(DataFrameTransformerBase):
         )
         return self
 
-    def add_pitch(self, alpha: float = 0.98) -> "DataFrameTransformerBase":
+    def add_pitch(self, alpha: float = 0.98) -> "DataFrameTransformerV2":
         self.data[PITCH + "_calculated"] = calc_pitch(
             acc_x_list=self.data[ACC_X].tolist(),
             acc_y_list=self.data[ACC_Y].tolist(),
@@ -169,7 +190,11 @@ class DataFrameTransformerV2(DataFrameTransformerBase):
 
 
 if __name__ == '__main__':
-    df = pd.read_csv(r"C:\dane_z_dzisiaj\Download\data20260718_200831.csv")
-    dt = DataFrameTransformerV2(df)
-    df = dt.add_time().result()
+    import sys
+
+    if len(sys.argv) < 2:
+        raise SystemExit("uzycie: python -m accur8pool.data_processing.data_transformations <plik.csv>")
+
+    df = pd.read_csv(sys.argv[1])
+    df = DataFrameTransformerV2(df).add_time().result()
     print(df[TIME])

@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
-from scipy.signal import filtfilt, butter
-from .const import *
+from scipy.signal import butter, filtfilt
+
+from .const import ACC_X, ACC_Y, ACC_Z
 
 
 def calc_pitch(acc_x_list, acc_y_list, acc_z_list, gyr_y_list, dt_list, alpha):
@@ -142,6 +143,9 @@ def calc_jerk(acc_x_list, acc_y_list, acc_z_list, dt_list):
     magnitude = np.array(magnitude)
     dt_array = np.array(dt_list)
 
+    if np.any(dt_array[1:] == 0):
+        raise ValueError('dt_list zawiera zera - nie mozna policzyc jerk')
+
     # Obliczamy różnice między kolejnymi próbkami
     jerk = np.zeros_like(magnitude)
     # (mag[i] - mag[i-1]) / dt[i]
@@ -167,9 +171,14 @@ def lowpass_filter(data, cutoff=8, fs=100):
 
 
 if __name__ == '__main__':
+    import sys
+
     import plotly.express as px
 
-    df = get_df_from_csv(r'/data1\wolneuderzeniewbutle.csv')
+    if len(sys.argv) < 2:
+        raise SystemExit("uzycie: python -m accur8pool.data_processing.utils <plik.csv>")
+
+    df = get_df_from_csv(sys.argv[1])
     mag = calc_magnitude(df[ACC_X], df[ACC_Y], df[ACC_Z])
     fil_mag = lowpass_filter(mag, cutoff=20)
     df_plot = pd.DataFrame({'fil_mag': fil_mag, 'mag': mag})

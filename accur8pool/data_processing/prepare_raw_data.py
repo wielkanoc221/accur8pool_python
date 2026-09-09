@@ -1,10 +1,22 @@
 import argparse
+import sys
 from pathlib import Path
+
 import pandas as pd
 from pandas import DataFrame
-from accur8pool.data_processing.const import *
 
+from accur8pool.data_processing.const import (
+    ACC_MAGNITUDE,
+    ACC_X,
+    ACC_Y,
+    ACC_Z,
+    GYR_MAGNITUDE,
+    GYR_X,
+    GYR_Y,
+    GYR_Z,
+)
 from accur8pool.data_processing.data_transformations import DataFrameTransformerBase, DataFrameTransformerV2
+from accur8pool.files_utils.filesManager import FilesManager
 
 
 class FileReadException(Exception):
@@ -47,18 +59,20 @@ def transform_raw_df(df: DataFrame) -> pd.DataFrame:
             .result()
         )
     except Exception as e:
-        raise TransformException(e)
+        raise TransformException(e) from e
 
 
-def check_columns(df: pd.DataFrame):
-    try:
-        reuqired_columns = {'accx', 'accy', 'accz', 'gyrx', 'gyry', 'gyrz', 'magx', 'magy', 'magz', 'linaccx',
-                            'linaccy',
-                            'linaccz', 'rotx', 'roty', 'rotz', 'timestamp'}
-        columns = set(df.columns)
-    except Exception as e:
-        raise WrongColumnsException(e)
-    return reuqired_columns.issubset(columns)
+REQUIRED_COLUMNS = frozenset({
+    'accx', 'accy', 'accz', 'gyrx', 'gyry', 'gyrz', 'magx', 'magy', 'magz',
+    'linaccx', 'linaccy', 'linaccz', 'rotx', 'roty', 'rotz', 'timestamp',
+})
+
+
+def check_columns(df: pd.DataFrame) -> None:
+    """Rzuca WrongColumnsException gdy brakuje ktorejs z wymaganych kolumn."""
+    missing = REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise WrongColumnsException(f'brakujace kolumny: {sorted(missing)}')
 
 
 def save_data(df: DataFrame, output_dir, filename):
@@ -68,13 +82,7 @@ def save_data(df: DataFrame, output_dir, filename):
         save_path = output_dir / filename
         df.to_csv(save_path, index=False)
     except Exception as e:
-        raise SaveException(e)
-
-
-def get_csv_paths(input_dir):
-    input_dir = Path(input_dir)
-    paths = list(input_dir.rglob('*.csv'))
-    return paths
+        raise SaveException(e) from e
 
 
 def read_csv(path):
@@ -82,24 +90,30 @@ def read_csv(path):
         df = pd.read_csv(path, engine="pyarrow")
 
     except Exception as e:
-        raise FileReadException(e)
+        raise FileReadException(e) from e
 
     return df
 
 
-def prepare_raw_data_and_save(input_paths: list[Path], output_dir: Path):
+def prepare_raw_data_and_save(input_paths: list[Path], output_dir: Path) -> int:
+    """Zwraca liczbe plikow przetworzonych bez bledu."""
     print(f'input_files: {len(input_paths)}')
+    output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
+    ok_count = 0
     for index, path in enumerate(input_paths, start=1):
         try:
             print(index, '/', len(input_paths))
             df = read_csv(path)
+            check_columns(df)
             df['session_index'] = path.stem
             transformed = transform_raw_df(df)
             save_data(transformed, output_dir, path.name)
 
         except FileReadException as e:
             print(f'ERROR blad odczytu pliku {path} {e} ')
+        except WrongColumnsException as e:
+            print(f'ERROR nieprawidlowe kolumny w pliku {path} {e}')
         except TransformException as e:
             print(f'ERROR blad transformacji pliku {path} {e}')
 
@@ -109,7 +123,11 @@ def prepare_raw_data_and_save(input_paths: list[Path], output_dir: Path):
         except Exception as e:
             print(f'ERROR nieznany blad {e}')
         else:
+            ok_count += 1
             print(f'OK transformacja {path}')
+
+    print(f'przetworzono {ok_count}/{len(input_paths)} plikow')
+    return ok_count
 
 
 def parse_args():
@@ -129,35 +147,43 @@ def parse_args():
 
     parser.add_argument(
         "--output_dir",
-        required=True,
         help="Folder zapisu przygotowanych plików",
-        default=r'.\prepared'
+        default="prepared",
     )
 
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main() -> int:
     args = parse_args()
-    input_paths = []
-    output_dir = args.output_dir
-    output_dir = Path(output_dir)
+
+    if args.input_dir and args.input_files:
+        raise ValueError("Podaj albo input_dir albo input_files, nie oba")
+
+    if args.input_dir:
+        input_paths = FilesManager.get_csv_paths(args.input_dir)
+    elif args.input_files:
+        input_paths = [Path(p) for p in args.input_files]
+    else:
+        raise ValueError("Musisz podać input_dir albo input_files")
+
+    if not input_paths:
+        raise ValueError("Nie znaleziono zadnego pliku .csv")
+
+    ok_count = prepare_raw_data_and_save(input_paths, Path(args.output_dir))
+
+    return 0 if ok_count == len(input_paths) else 1
+
+
+if __name__ == '__main__':
     try:
-        if args.input_dir and args.input_files:
-            raise ValueError("Podaj albo input_dir albo input_files, nie oba")
+        exit_code = main()
+    except Exception as exc:
+        print(f'ERROR {exc}')
+        exit_code = 2
 
-        if args.input_dir:
-            input_paths = list(Path(args.input_dir).glob("*.csv"))
-
-        elif args.input_files:
-            input_paths = [Path(p) for p in args.input_files]
-
-        else:
-            raise ValueError("Musisz podać input_dir albo input_files")
-
-        prepare_raw_data_and_save(input_paths, output_dir)
-
-    except Exception as e:
-        print(e)
-    finally:
+    # pauza tylko przy uruchomieniu z konsoli (dwuklik w Windows), nie w skryptach/CI
+    if sys.stdin is not None and sys.stdin.isatty():
         input('exit...')
+
+    raise SystemExit(exit_code)
