@@ -1,13 +1,11 @@
 import base64
 import io
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import pandas as pd
-from dash import Dash, dcc, html, Input, Output, State, dash_table, ctx
-from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
-
+from dash import Dash, Input, Output, State, ctx, dash_table, dcc, html
+from dash.exceptions import PreventUpdate
 
 # ============================================================
 # Helpers
@@ -92,7 +90,7 @@ app.layout = html.Div(
                     },
                     children=[
                         dcc.Upload(
-                            id="upload-data1",
+                            id="upload-data",
                             children=html.Div("Przeciągnij CSV tutaj albo kliknij, aby wybrać plik"),
                             style={
                                 "width": "100%",
@@ -308,7 +306,7 @@ app.layout = html.Div(
             ],
         ),
 
-        dcc.Store(id="stored-data1"),
+        dcc.Store(id="stored-data"),
         dcc.Store(id="stored-filename"),
         dcc.Store(id="stored-labels", data=[]),
         dcc.Store(id="stored-current-range"),
@@ -322,13 +320,13 @@ app.layout = html.Div(
 # ============================================================
 
 @app.callback(
-    Output("stored-data1", "data1"),
-    Output("stored-filename", "data1"),
+    Output("stored-data", "data"),
+    Output("stored-filename", "data"),
     Output("file-info", "children"),
     Output("time-column", "options"),
     Output("sensor-columns", "options"),
-    Input("upload-data1", "contents"),
-    State("upload-data1", "filename"),
+    Input("upload-data", "contents"),
+    State("upload-data", "filename"),
     prevent_initial_call=True,
 )
 def handle_upload(contents, filename):
@@ -345,10 +343,10 @@ def handle_upload(contents, filename):
 
 @app.callback(
     Output("sensor-graph", "figure"),
-    Input("stored-data1", "data1"),
+    Input("stored-data", "data"),
     Input("sensor-columns", "value"),
     Input("time-column", "value"),
-    Input("stored-labels", "data1"),
+    Input("stored-labels", "data"),
     Input("normalize-display", "value"),
 )
 def update_graph(data_json, sensor_columns, time_column, labels, normalize_display):
@@ -404,13 +402,13 @@ def update_graph(data_json, sensor_columns, time_column, labels, normalize_displ
 # ============================================================
 
 @app.callback(
-    Output("stored-current-range", "data1"),
-    Output("stored-current-idx-range", "data1"),
+    Output("stored-current-range", "data"),
+    Output("stored-current-idx-range", "data"),
     Output("range-info", "children"),
     Output("manual-start-idx", "value"),
     Output("manual-end-idx", "value"),
     Input("sensor-graph", "relayoutData"),
-    State("stored-data1", "data1"),
+    State("stored-data", "data"),
     State("time-column", "value"),
     prevent_initial_call=True,
 )
@@ -454,18 +452,18 @@ def capture_range(relayout_data, data_json, time_column):
 # ============================================================
 
 @app.callback(
-    Output("stored-labels", "data1"),
+    Output("stored-labels", "data"),
     Input("add-label-btn", "n_clicks"),
     Input("undo-label-btn", "n_clicks"),
     Input("clear-labels-btn", "n_clicks"),
-    State("stored-labels", "data1"),
-    State("stored-current-range", "data1"),
-    State("stored-current-idx-range", "data1"),
+    State("stored-labels", "data"),
+    State("stored-current-range", "data"),
+    State("stored-current-idx-range", "data"),
     State("label-input", "value"),
     State("label-type", "value"),
     State("manual-start-idx", "value"),
     State("manual-end-idx", "value"),
-    State("stored-data1", "data1"),
+    State("stored-data", "data"),
     State("time-column", "value"),
     prevent_initial_call=True,
 )
@@ -538,8 +536,8 @@ def manage_labels(
 
 
 @app.callback(
-    Output("labels-table", "data1"),
-    Input("stored-labels", "data1"),
+    Output("labels-table", "data"),
+    Input("stored-labels", "data"),
 )
 def update_labels_table(labels):
     return labels or []
@@ -550,11 +548,11 @@ def update_labels_table(labels):
 # ============================================================
 
 @app.callback(
-    Output("download-labeled-csv", "data1"),
+    Output("download-labeled-csv", "data"),
     Input("export-csv-btn", "n_clicks"),
-    State("stored-data1", "data1"),
-    State("stored-filename", "data1"),
-    State("stored-labels", "data1"),
+    State("stored-data", "data"),
+    State("stored-filename", "data"),
+    State("stored-labels", "data"),
     State("export-mode", "value"),
     State("default-label-value", "value"),
     State("default-meta-value", "value"),
@@ -596,7 +594,7 @@ def export_labeled_csv(
                 start_idx_col[idx] = str(item["start_idx"])
                 end_idx_col[idx] = str(item["end_idx"])
 
-    safe_name = (filename or "data1.csv").rsplit(".", 1)[0]
+    safe_name = (filename or "data.csv").rsplit(".", 1)[0]
 
     if export_mode == "label_only":
         out = pd.DataFrame(
@@ -623,10 +621,10 @@ def export_labeled_csv(
 # ============================================================
 
 @app.callback(
-    Output("download-ranges-csv", "data1"),
+    Output("download-ranges-csv", "data"),
     Input("export-ranges-btn", "n_clicks"),
-    State("stored-labels", "data1"),
-    State("stored-filename", "data1"),
+    State("stored-labels", "data"),
+    State("stored-filename", "data"),
     prevent_initial_call=True,
 )
 def export_ranges_csv(n_clicks, labels, filename):
@@ -635,7 +633,7 @@ def export_ranges_csv(n_clicks, labels, filename):
     if not labels:
         raise PreventUpdate
 
-    safe_name = (filename or "data1.csv").rsplit(".", 1)[0]
+    safe_name = (filename or "data.csv").rsplit(".", 1)[0]
     ranges_df = pd.DataFrame(labels)
 
     return dcc.send_data_frame(ranges_df.to_csv, f"{safe_name}.csv", index=False)
