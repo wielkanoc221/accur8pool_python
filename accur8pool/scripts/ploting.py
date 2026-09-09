@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 import numpy as np
-import plotly.express as px
-from plotly.graph_objects import Figure
-from pandas import DataFrame
-from accur8pool.data_processing.data_transformations import DataFrameTransformerBase
 import pandas as pd
+import plotly.express as px
+from pandas import DataFrame
+from plotly.graph_objects import Figure
+
+from accur8pool.data_processing.data_transformations import DataFrameTransformerBase
 
 
 def add_labels_to_plot(
@@ -70,7 +72,10 @@ def add_labels_to_plot(
 def to_segments(labels):
     labels = np.asarray(labels)
 
-    change = np.where(labels != np.roll(labels, 1))[0]
+    if labels.size == 0:
+        return []
+
+    change = np.where(labels[1:] != labels[:-1])[0] + 1
     change = np.r_[0, change, len(labels)]
 
     segments = []
@@ -91,7 +96,8 @@ def plot_prepared_data(prepared_data_frame: DataFrame, labels_data_frame: DataFr
     :param prepared_data_frame:
     :param labels_data_frame:
     :param normalize_data:
-    :return:
+    :param columns:
+    :return: obiekt Figure - wywolanie .show() nalezy do strony wolajacej
     """
     colors = {
         0: "rgba(0,0,0,1)",
@@ -108,25 +114,29 @@ def plot_prepared_data(prepared_data_frame: DataFrame, labels_data_frame: DataFr
                                'jerk_accy', 'jerk_accz', 'acc_magnitude_jerk', 'jerk_gyrx',
                                'jerk_gyry', 'jerk_gyrz', 'gyr_magnitude_jerk', 'roll', 'pitch']
 
-    if not all(col in prepared_data_frame.columns for col in data_columns):
-        raise ValueError('Nieprawidlowe wartosci kolumn')
+    missing = [col for col in data_columns if col not in prepared_data_frame.columns]
+    if missing:
+        raise ValueError(f'Brakujace kolumny w prepared_data_frame: {missing}')
 
     if normalize_data:
         prepared_data_frame = DataFrameTransformerBase(prepared_data_frame).normalize(
             columns=list(data_columns)).result()
 
     fig = px.line(prepared_data_frame, y=data_columns)
-    labels = labels_data_frame['label']
+
     if labels_data_frame is not None:
-        segments = to_segments(labels)
-        for index, (start, end, label) in enumerate(segments):
-            print(index, '/', len(segments))
+        if 'label' not in labels_data_frame.columns:
+            raise ValueError("labels_data_frame nie ma kolumny 'label'")
+
+        default_color = "rgba(128,128,128,1)"
+        for start, _end, label in to_segments(labels_data_frame['label']):
             fig.add_vline(
                 x=start,
-                line_color=colors[label],
-                line_width=5
+                line_color=colors.get(label, default_color),
+                line_width=5,
             )
-    fig.show()
+
+    return fig
 
 #
 # if __name__ == '__main__':
