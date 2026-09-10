@@ -98,7 +98,7 @@ def split_by_index(
         train_frac: float = 0.7,
         test_frac: float = 0.2,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Podzial po numerze wiersza - tak jak w notebooku xgboostv2."""
+    """Podzial po numerze wiersza."""
     _validate_fracs(train_frac, test_frac)
 
     n = len(df)
